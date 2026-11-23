@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>みんなのリアルタイム掲示板 (BBS)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+      background-color: #f8fafc;
+    }
+    .line-clamp-2 {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+
+  <!-- ヘッダー -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <div class="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-2 cursor-pointer" onclick="showListView()">
+        <span class="text-2xl">💬</span>
+        <h1 class="text-xl font-bold tracking-tight text-slate-900">みんなのリアルタイム掲示板</h1>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <span id="sync-status" class="text-xs text-emerald-600 font-bold hidden sm:inline-block">🟢 接続中</span>
+        <button type="button" onclick="openCreateModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-4 py-2 rounded-lg transition shadow-sm cursor-pointer">
+          ＋ 新規スレッド
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main class="flex-1 max-w-4xl w-full mx-auto px-4 py-6">
+
+    <!-- 一覧ビュー -->
+    <div id="list-view" class="space-y-5">
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+        <div class="flex flex-col sm:flex-row gap-3">
+          <div class="relative flex-1">
+            <input type="text" id="search-input" placeholder="🔍 キーワードでスレッドを検索..."
+              class="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition"
+              oninput="renderThreadList()" />
+          </div>
+          <select id="sort-select" onchange="renderThreadList()"
+            class="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="updated">最新更新順</option>
+            <option value="created">新規作成順</option>
+            <option value="likes">いいね人気順</option>
+            <option value="comments">コメント多い順</option>
+          </select>
+        </div>
+
+        <!-- カテゴリタブ -->
+        <div class="flex items-center gap-2 overflow-x-auto pb-1" id="category-tabs">
+          <button type="button" data-cat="すべて" class="cat-btn px-3 py-1.5 rounded-full text-xs font-bold bg-indigo-600 text-white transition whitespace-nowrap cursor-pointer">すべて</button>
+          <button type="button" data-cat="雑談" class="cat-btn px-3 py-1.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition whitespace-nowrap cursor-pointer">雑談</button>
+          <button type="button" data-cat="質問・相談" class="cat-btn px-3 py-1.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition whitespace-nowrap cursor-pointer">質問・相談</button>
+          <button type="button" data-cat="趣味・エンタメ" class="cat-btn px-3 py-1.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition whitespace-nowrap cursor-pointer">趣味・エンタメ</button>
+          <button type="button" data-cat="ニュース・話題" class="cat-btn px-3 py-1.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition whitespace-nowrap cursor-pointer">ニュース・話題</button>
+          <button type="button" data-cat="その他" class="cat-btn px-3 py-1.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition whitespace-nowrap cursor-pointer">その他</button>
+        </div>
+      </div>
+
+      <!-- スレッド一覧コンテナ -->
+      <div id="thread-list" class="space-y-3">
+        <div class="bg-white rounded-xl border border-slate-200 p-10 text-center text-slate-400">
+          読み込み中...
+        </div>
+      </div>
+    </div>
+
+    <!-- 詳細ビュー -->
+    <div id="detail-view" class="hidden space-y-6">
+      <button type="button" onclick="showListView()" class="inline-flex items-center gap-1.5 text-sm font-bold text-slate-600 hover:text-indigo-600 transition cursor-pointer">
+        ← スレッド一覧に戻る
+      </button>
+
+      <!-- 親スレッド詳細カード -->
+      <div id="thread-detail-card" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6"></div>
+
+      <!-- コメント一覧 -->
+      <div class="space-y-3">
+        <h3 class="text-base font-bold text-slate-800">
+          💬 返信コメント (<span id="comment-count">0</span>)
+        </h3>
+        <div id="comment-list" class="space-y-3"></div>
+      </div>
+
+      <!-- 新規返信フォーム -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+        <h4 class="text-sm font-bold text-slate-800 mb-3">このスレッドに返信する</h4>
+        <form id="reply-form" onsubmit="handleReplySubmit(event)" class="space-y-3">
+          <div>
+            <input type="text" id="reply-author" placeholder="投稿者名（省略時は「名無しさん」）"
+              class="w-full sm:w-64 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white" />
+          </div>
+          <div>
+            <textarea id="reply-content" rows="3" required placeholder="返信内容を入力してください..."
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"></textarea>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <label class="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition">
+                <span>🖼️ 画像を添付</span>
+                <input type="file" id="reply-image-input" accept="image/*" class="hidden" onchange="handleImageSelect(event, 'reply')" />
+              </label>
+              <span id="reply-image-status" class="text-xs text-indigo-600 font-bold"></span>
+            </div>
+
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-5 py-2 rounded-lg transition shadow-sm cursor-pointer">
+              返信を投稿
+            </button>
+          </div>
+
+          <div id="reply-image-preview-box" class="hidden relative inline-block mt-2">
+            <img id="reply-image-preview" src="" alt="プレビュー" class="max-h-40 rounded-lg border border-slate-200 shadow-sm" />
+            <button type="button" onclick="clearImage('reply')" class="absolute -top-2 -right-2 bg-slate-800 text-white rounded-full w-6 h-6 text-xs font-bold hover:bg-red-600 transition shadow cursor-pointer">
+              ✕
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 新規作成・編集モーダル -->
+  <div id="thread-modal" class="fixed inset-0 bg-slate-900/50 z-40 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h2 id="modal-title" class="text-lg font-bold text-slate-900">新規スレッド作成</h2>
+        <button type="button" onclick="closeThreadModal()" class="text-slate-400 hover:text-slate-600 text-lg font-bold p-1 cursor-pointer">
+          ✕
+        </button>
+      </div>
+
+      <form id="thread-form" onsubmit="handleThreadSubmit(event)" class="space-y-4">
+        <input type="hidden" id="edit-thread-id" value="" />
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">カテゴリ</label>
+          <select id="thread-category" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="雑談">雑談</option>
+            <option value="質問・相談">質問・相談</option>
+            <option value="趣味・エンタメ">趣味・エンタメ</option>
+            <option value="ニュース・話題">ニュース・話題</option>
+            <option value="その他">その他</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">タイトル <span class="text-red-500">*</span></label>
+          <input type="text" id="thread-title" required placeholder="スレッドのタイトルを入力"
+            class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white" />
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">投稿者名</label>
+          <input type="text" id="thread-author" placeholder="省略時は「名無しさん」"
+            class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white" />
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">本文 <span class="text-red-500">*</span></label>
+          <textarea id="thread-content" rows="4" required placeholder="本文を入力してください..."
+            class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"></textarea>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">画像添付（任意）</label>
+          <div id="drop-zone" onclick="document.getElementById('thread-image-input').click()"
+            class="border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-xl p-4 text-center cursor-pointer transition bg-slate-50 hover:bg-indigo-50/30">
+            <p class="text-2xl mb-1">🖼️</p>
+            <p class="text-xs text-slate-600 font-bold">クリックして画像を選択、またはドラッグ＆ドロップ</p>
+            <input type="file" id="thread-image-input" accept="image/*" class="hidden" onchange="handleImageSelect(event, 'thread')" />
+          </div>
+
+          <div id="thread-image-preview-box" class="hidden relative inline-block mt-3">
+            <img id="thread-image-preview" src="" alt="プレビュー" class="max-h-44 rounded-lg border border-slate-200 shadow-sm" />
+            <button type="button" onclick="clearImage('thread')" class="absolute -top-2 -right-2 bg-slate-800 text-white rounded-full w-6 h-6 text-xs font-bold hover:bg-red-600 transition shadow cursor-pointer">
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
+          <button type="button" onclick="closeThreadModal()" class="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition cursor-pointer">
+            キャンセル
+          </button>
+          <button type="submit" id="modal-submit-btn" class="px-5 py-2 text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition shadow-sm cursor-pointer">
+            投稿する
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 画像拡大ライトボックスモーダル -->
+  <div id="lightbox-modal" onclick="closeLightbox()" class="fixed inset-0 bg-black/85 z-50 hidden flex items-center justify-center p-4 cursor-zoom-out">
+    <button type="button" onclick="closeLightbox()" class="absolute top-4 right-4 text-white bg-white/20 hover:bg-white/30 w-10 h-10 rounded-full font-bold cursor-pointer">
+      ✕
+    </button>
+    <img id="lightbox-img" src="" alt="拡大画像" class="max-w-full max-h-[90vh] rounded-lg shadow-2xl object-contain" onclick="event.stopPropagation()" />
+  </div>
+
+  <!-- Firebase SDK (モジュール版) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getDatabase, ref, set, get, push, remove, child, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+    // プレビュー環境用の自動設定（このままリアルタイム共有として動作します）
+    const firebaseConfig = {
+    apiKey: "AIzaSyCH9DNNY3Afo9IrZBh-Be9zBIF9YxXGMDI",
+    authDomain: "suugaku-956dd.firebaseapp.com",
+    databaseURL: "https://suugaku-956dd-default-rtdb.firebaseio.com",
+    projectId: "suugaku-956dd",
+    storageBucket: "suugaku-956dd.firebasestorage.app",
+    messagingSenderId: "53172247991",
+    appId: "1:53172247991:web:94c57cfad04f38ce3cdc32",
+    measurementId: "G-FCRYSZX7W6"
+  };
+
+    // Firebase初期化
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    const USER_ID_KEY = 'realtime_bbs_user_id';
+    let currentUserId = localStorage.getItem(USER_ID_KEY);
+    if (!currentUserId) {
+      currentUserId = 'user_' + Math.random().toString(36).substring(2, 11);
+      localStorage.setItem(USER_ID_KEY, currentUserId);
+    }
+
+    let threads = [];
+    let selectedCategory = 'すべて';
+    let currentThreadId = null;
+    let tempThreadImage = null;
+    let tempReplyImage = null;
+
+    // リアルタイムでデータを監視・同期
+    const threadsRef = ref(db, 'threads');
+    onValue(threadsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        // オブジェクトを配列に変換し、作成日時の新しい順などに並び替え
+        threads = Object.keys(data).map(key => ({
+          id: key,
+          ...data[key]
+        }));
+      } else {
+        threads = [];
+      }
+      renderThreadList();
+      if (currentThreadId) {
+        renderThreadDetail();
+      }
+    }, (error) => {
+      console.error("Firebase同期エラー:", error);
+      document.getElementById('sync-status').textContent = '🔴 同期エラー';
+      document.getElementById('sync-status').className = 'text-xs text-red-600 font-bold';
+    });
+
+    // グローバルに関数を公開（HTMLのonclickから呼び出せるようにする）
+    window.showListView = function() {
+      currentThreadId = null;
+      document.getElementById('list-view').classList.remove('hidden');
+      document.getElementById('detail-view').classList.add('hidden');
+      renderThreadList();
+    };
+
+    window.showDetailView = function(threadId) {
+      currentThreadId = threadId;
+      document.getElementById('list-view').classList.add('hidden');
+      document.getElementById('detail-view').classList.remove('hidden');
+      renderThreadDetail();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    document.querySelectorAll('.cat-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.cat-btn').forEach(b => {
+          b.classList.remove('bg-indigo-600', 'text-white');
+          b.classList.add('bg-slate-100', 'text-slate-600');
+        });
+        btn.classList.remove('bg-slate-100', 'text-slate-600');
+        btn.classList.add('bg-indigo-600', 'text-white');
+        selectedCategory = btn.dataset.cat;
+        renderThreadList();
+      });
+    });
+
+    window.renderThreadList = function() {
+      const container = document.getElementById('thread-list');
+      const keyword = document.getElementById('search-input').value.trim().toLowerCase();
+      const sortBy = document.getElementById('sort-select').value;
+
+      let filtered = threads.filter(t => {
+        const matchCat = selectedCategory === 'すべて' || t.category === selectedCategory;
+        const matchKey = !keyword ||
+          (t.title && t.title.toLowerCase().includes(keyword)) ||
+          (t.content && t.content.toLowerCase().includes(keyword)) ||
+          (t.author && t.author.toLowerCase().includes(keyword));
+        return matchCat && matchKey;
+      });
+
+      filtered.sort((a, b) => {
+        if (sortBy === 'updated') return (b.updatedAt || 0) - (a.updatedAt || 0);
+        if (sortBy === 'created') return (b.createdAt || 0) - (a.createdAt || 0);
+        if (sortBy === 'likes') return ((b.likes ? Object.keys(b.likes).length : 0)) - ((a.likes ? Object.keys(a.likes).length : 0));
+        if (sortBy === 'comments') return ((b.comments ? Object.keys(b.comments).length : 0)) - ((a.comments ? Object.keys(a.comments).length : 0));
+        return 0;
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-10 text-center text-slate-500">
+            <p class="text-sm">スレッドがまだありません。最初のスレッドを作ってみましょう！</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map(t => {
+        const likesArr = t.likes ? Object.values(t.likes) : [];
+        const likeCount = likesArr.length;
+        const isLiked = likesArr.includes(currentUserId);
+        const commentsArr = t.comments ? Object.values(t.comments) : [];
+        const commentCount = commentsArr.length;
+
+        return `
+          <div onclick="showDetailView('${t.id}')" class="bg-white rounded-xl border border-slate-200 hover:border-indigo-300 p-5 shadow-xs hover:shadow-md transition cursor-pointer flex gap-4 justify-between">
+            <div class="space-y-2 flex-1 min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold border ${getCategoryBadgeColor(t.category)}">
+                  ${escapeHTML(t.category)}
+                </span>
+                ${t.image ? `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-600">🖼️ 画像あり</span>` : ''}
+                <span class="text-xs text-slate-400">投稿者: ${escapeHTML(t.author)}</span>
+                <span class="text-xs text-slate-400">• ${formatDate(t.updatedAt || t.createdAt)}</span>
+              </div>
+
+              <h2 class="text-base sm:text-lg font-bold text-slate-900 truncate">${escapeHTML(t.title)}</h2>
+              <p class="text-sm text-slate-600 line-clamp-2 whitespace-pre-line">${escapeHTML(t.content)}</p>
+
+              <div class="flex items-center gap-4 pt-1 text-xs text-slate-500">
+                <button type="button" onclick="event.stopPropagation(); toggleThreadLike('${t.id}')"
+                  class="px-2.5 py-1 rounded-md transition cursor-pointer ${isLiked ? 'text-pink-600 bg-pink-50 font-bold' : 'hover:bg-slate-100'}">
+                  ${isLiked ? '❤️' : '🤍'} ${likeCount}
+                </button>
+                <span>💬 ${commentCount}件の返信</span>
+              </div>
+            </div>
+
+            ${t.image ? `
+              <div class="shrink-0 self-center">
+                <img src="${t.image}" alt="サムネイル" class="w-20 h-20 sm:w-24 sm:h-24 object-cover rounded-lg border border-slate-200" />
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    };
+
+    window.renderThreadDetail = function() {
+      const thread = threads.find(t => t.id === currentThreadId);
+      if (!thread) {
+        showListView();
+        return;
+      }
+
+      const isOwner = thread.authorId === currentUserId;
+      const likesArr = thread.likes ? Object.values(thread.likes) : [];
+      const isLiked = likesArr.includes(currentUserId);
+      const likeCount = likesArr.length;
+
+      const detailCard = document.getElementById('thread-detail-card');
+      detailCard.innerHTML = `
+        <div class="space-y-4">
+          <div class="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+            <div class="space-y-1.5">
+              <div class="flex items-center gap-2">
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold border ${getCategoryBadgeColor(thread.category)}">
+                  ${escapeHTML(thread.category)}
+                </span>
+                <span class="text-xs text-slate-400">作成: ${formatDate(thread.createdAt)}</span>
+              </div>
+              <h1 class="text-xl sm:text-2xl font-bold text-slate-900">${escapeHTML(thread.title)}</h1>
+              <p class="text-xs text-slate-500">投稿者: <span class="font-bold text-slate-700">${escapeHTML(thread.author)}</span></p>
+            </div>
+
+            ${isOwner ? `
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="openEditModal('${thread.id}')" class="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer">
+                  ✏️ 編集
+                </button>
+                <button type="button" onclick="deleteThread('${thread.id}')" class="px-3 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition cursor-pointer">
+                  🗑️ 削除
+                </button>
+              </div>
+            ` : ''}
+          </div>
+
+          <div class="text-sm sm:text-base text-slate-800 whitespace-pre-line leading-relaxed">${escapeHTML(thread.content)}</div>
+
+          ${thread.image ? `
+            <div class="pt-2">
+              <img src="${thread.image}" alt="添付画像" onclick="openLightbox('${thread.image}')"
+                class="max-h-96 rounded-xl border border-slate-200 shadow-xs cursor-zoom-in hover:opacity-95 transition" />
+              <p class="text-[11px] text-slate-400 mt-1">※ 画像をクリックすると拡大表示されます</p>
+            </div>
+          ` : ''}
+
+          <div class="pt-3 border-t border-slate-100 flex items-center justify-between">
+            <button type="button" onclick="toggleThreadLike('${thread.id}')"
+              class="px-3.5 py-1.5 rounded-lg text-sm font-bold transition cursor-pointer ${isLiked ? 'bg-pink-50 text-pink-600 border border-pink-200' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'}">
+              ${isLiked ? '❤️' : '🤍'} いいね！ (${likeCount})
+            </button>
+          </div>
+        </div>
+      `;
+
+      const commentsObj = thread.comments || {};
+      const comments = Object.keys(commentsObj).map(key => ({ id: key, ...commentsObj[key] }));
+      document.getElementById('comment-count').textContent = comments.length;
+      const commentList = document.getElementById('comment-list');
+
+      if (comments.length === 0) {
+        commentList.innerHTML = `
+          <div class="bg-white rounded-xl border border-slate-200 p-6 text-center text-sm text-slate-400">
+            まだ返信はありません。最初のコメントを投稿してみましょう！
+          </div>
+        `;
+      } else {
+        commentList.innerHTML = comments.map((c, idx) => {
+          const isCommentOwner = c.authorId === currentUserId;
+          const cLikesArr = c.likes ? Object.values(c.likes) : [];
+          const isCommentLiked = cLikesArr.includes(currentUserId);
+          const commentLikes = cLikesArr.length;
+
+          return `
+            <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-2.5">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="font-bold text-indigo-600">#${idx + 1}</span>
+                  <span class="font-bold text-slate-800">${escapeHTML(c.author)}</span>
+                  <span class="text-slate-400">${formatDate(c.createdAt)}</span>
+                </div>
+                ${isCommentOwner ? `
+                  <button type="button" onclick="deleteComment('${thread.id}', '${c.id}')" title="返信を削除" class="text-slate-400 hover:text-red-600 text-xs font-bold p-1 rounded transition cursor-pointer">
+                    🗑️ 削除
+                  </button>
+                ` : ''}
+              </div>
+
+              <p class="text-sm text-slate-700 whitespace-pre-line">${escapeHTML(c.content)}</p>
+
+              ${c.image ? `
+                <div>
+                  <img src="${c.image}" alt="返信画像" onclick="openLightbox('${c.image}')"
+                    class="max-h-60 rounded-lg border border-slate-200 cursor-zoom-in hover:opacity-95 transition" />
+                </div>
+              ` : ''}
+
+              <div>
+                <button type="button" onclick="toggleCommentLike('${thread.id}', '${c.id}')"
+                  class="px-2.5 py-1 rounded-md text-xs transition cursor-pointer ${isCommentLiked ? 'bg-pink-50 text-pink-600 font-bold' : 'text-slate-500 hover:bg-slate-100'}">
+                  ${isCommentLiked ? '❤️' : '🤍'} ${commentLikes}
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    };
+
+    // ユーティリティ
+    function escapeHTML(str) {
+      if (!str) return '';
+      return str.replace(/[&<>"']/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[m]));
+    }
+
+    function formatDate(timestamp) {
+      const d = new Date(timestamp);
+      return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+
+    function getCategoryBadgeColor(cat) {
+      const map = {
+        '雑談': 'bg-blue-50 text-blue-700 border-blue-200',
+        '質問・相談': 'bg-amber-50 text-amber-700 border-amber-200',
+        '趣味・エンタメ': 'bg-purple-50 text-purple-700 border-purple-200',
+        'ニュース・話題': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        'その他': 'bg-slate-100 text-slate-700 border-slate-200'
+      };
+      return map[cat] || map['その他'];
+    }
+
+    // 画像圧縮
+    function compressImage(file, maxWidth = 800, quality = 0.75) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            let width = img.width;
+            let height = img.height;
+            if (width > maxWidth || height > maxWidth) {
+              if (width > height) {
+                height = Math.round((height * maxWidth) / width);
+                width = maxWidth;
+              } else {
+                width = Math.round((width * maxWidth) / height);
+                height = maxWidth;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          };
+          img.onerror = reject;
+          img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    window.handleImageSelect = async function(event, target) {
+      const file = event.target.files[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/')) {
+        alert('画像ファイルを選択してください。');
+        return;
+      }
+      try {
+        const compressedDataUrl = await compressImage(file);
+        if (target === 'thread') {
+          tempThreadImage = compressedDataUrl;
+          document.getElementById('thread-image-preview').src = compressedDataUrl;
+          document.getElementById('thread-image-preview-box').classList.remove('hidden');
+        } else {
+          tempReplyImage = compressedDataUrl;
+          document.getElementById('reply-image-preview').src = compressedDataUrl;
+          document.getElementById('reply-image-preview-box').classList.remove('hidden');
+          document.getElementById('reply-image-status').textContent = '画像選択済み';
+        }
+      } catch (err) {
+        alert('画像の読み込みに失敗しました。');
+      }
+    };
+
+    window.clearImage = function(target) {
+      if (target === 'thread') {
+        tempThreadImage = null;
+        document.getElementById('thread-image-input').value = '';
+        document.getElementById('thread-image-preview-box').classList.add('hidden');
+      } else {
+        tempReplyImage = null;
+        document.getElementById('reply-image-input').value = '';
+        document.getElementById('reply-image-preview-box').classList.add('hidden');
+        document.getElementById('reply-image-status').textContent = '';
+      }
+    };
+
+    const dropZone = document.getElementById('drop-zone');
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-indigo-500', 'bg-indigo-50'); });
+    dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('border-indigo-500', 'bg-indigo-50'); });
+    dropZone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
+      if (e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0];
+        const compressedDataUrl = await compressImage(file);
+        tempThreadImage = compressedDataUrl;
+        document.getElementById('thread-image-preview').src = compressedDataUrl;
+        document.getElementById('thread-image-preview-box').classList.remove('hidden');
+      }
+    });
+
+    // モーダル・送信処理
+    window.openCreateModal = function() {
+      document.getElementById('edit-thread-id').value = '';
+      document.getElementById('modal-title').textContent = '新規スレッド作成';
+      document.getElementById('modal-submit-btn').textContent = '投稿する';
+      document.getElementById('thread-form').reset();
+      clearImage('thread');
+      document.getElementById('thread-modal').classList.remove('hidden');
+    };
+
+    window.openEditModal = function(threadId) {
+      const thread = threads.find(t => t.id === threadId);
+      if (!thread) return;
+
+      document.getElementById('edit-thread-id').value = thread.id;
+      document.getElementById('modal-title').textContent = 'スレッドを編集';
+      document.getElementById('modal-submit-btn').textContent = '更新する';
+      document.getElementById('thread-category').value = thread.category;
+      document.getElementById('thread-title').value = thread.title;
+      document.getElementById('thread-author').value = thread.author;
+      document.getElementById('thread-content').value = thread.content;
+
+      if (thread.image) {
+        tempThreadImage = thread.image;
+        document.getElementById('thread-image-preview').src = thread.image;
+        document.getElementById('thread-image-preview-box').classList.remove('hidden');
+      } else {
+        clearImage('thread');
+      }
+
+      document.getElementById('thread-modal').classList.remove('hidden');
+    };
+
+    window.closeThreadModal = function() {
+      document.getElementById('thread-modal').classList.add('hidden');
+    };
+
+    window.handleThreadSubmit = async function(event) {
+      event.preventDefault();
+      const editId = document.getElementById('edit-thread-id').value;
+      const category = document.getElementById('thread-category').value;
+      const title = document.getElementById('thread-title').value.trim();
+      const author = document.getElementById('thread-author').value.trim() || '名無しさん';
+      const content = document.getElementById('thread-content').value.trim();
+
+      if (!title || !content) return;
+
+      if (editId) {
+        const threadRef = ref(db, `threads/${editId}`);
+        const current = threads.find(t => t.id === editId);
+        await set(threadRef, {
+          ...current,
+          category,
+          title,
+          author,
+          content,
+          image: tempThreadImage,
+          updatedAt: Date.now()
+        });
+        closeThreadModal();
+        renderThreadDetail();
+      } else {
+        const newThreadRef = push(ref(db, 'threads'));
+        await set(newThreadRef, {
+          category,
+          title,
+          author,
+          authorId: currentUserId,
+          content,
+          image: tempThreadImage,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+        closeThreadModal();
+        showListView();
+      }
+    };
+
+    window.deleteThread = async function(threadId) {
+      if (!confirm('このスレッドを削除してもよろしいですか？（返信もすべて削除されます）')) return;
+      await remove(ref(db, `threads/${threadId}`));
+      showListView();
+    };
+
+    window.toggleThreadLike = async function(threadId) {
+      const thread = threads.find(t => t.id === threadId);
+      if (!thread) return;
+
+      const likesRef = ref(db, `threads/${threadId}/likes`);
+      const snapshot = await get(likesRef);
+      let likesObj = snapshot.val() || {};
+      let likesArr = Object.entries(likesObj);
+
+      let foundKey = null;
+      for (let [key, uid] of likesArr) {
+        if (uid === currentUserId) {
+          foundKey = key;
+          break;
+        }
+      }
+
+      if (foundKey) {
+        await remove(ref(db, `threads/${threadId}/likes/${foundKey}`));
+      } else {
+        const newLikeRef = push(likesRef);
+        await set(newLikeRef, currentUserId);
+      }
+    };
+
+    window.handleReplySubmit = async function(event) {
+      event.preventDefault();
+      if (!currentThreadId) return;
+
+      const author = document.getElementById('reply-author').value.trim() || '名無しさん';
+      const content = document.getElementById('reply-content').value.trim();
+      if (!content) return;
+
+      const commentsRef = ref(db, `threads/${currentThreadId}/comments`);
+      const newCommentRef = push(commentsRef);
+      await set(newCommentRef, {
+        author,
+        authorId: currentUserId,
+        content,
+        image: tempReplyImage,
+        createdAt: Date.now()
+      });
+
+      const threadRef = ref(db, `threads/${currentThreadId}/updatedAt`);
+      await set(threadRef, Date.now());
+
+      document.getElementById('reply-content').value = '';
+      clearImage('reply');
+    };
+
+    window.deleteComment = async function(threadId, commentId) {
+      if (!confirm('この返信を削除してもよろしいですか？')) return;
+      await remove(ref(db, `threads/${threadId}/comments/${commentId}`));
+    };
+
+    window.toggleCommentLike = async function(threadId, commentId) {
+      const likesRef = ref(db, `threads/${threadId}/comments/${commentId}/likes`);
+      const snapshot = await get(likesRef);
+      let likesObj = snapshot.val() || {};
+      let likesArr = Object.entries(likesObj);
+
+      let foundKey = null;
+      for (let [key, uid] of likesArr) {
+        if (uid === currentUserId) {
+          foundKey = key;
+          break;
+        }
+      }
+
+      if (foundKey) {
+        await remove(ref(db, `threads/${threadId}/comments/${commentId}/likes/${foundKey}`));
+      } else {
+        const newLikeRef = push(likesRef);
+        await set(newLikeRef, currentUserId);
+      }
+    };
+
+    window.openLightbox = function(src) {
+      document.getElementById('lightbox-img').src = src;
+      document.getElementById('lightbox-modal').classList.remove('hidden');
+    };
+
+    window.closeLightbox = function() {
+      document.getElementById('lightbox-modal').classList.add('hidden');
+      document.getElementById('lightbox-img').src = '';
+    };
+  </script>
+</body>
+</html>
